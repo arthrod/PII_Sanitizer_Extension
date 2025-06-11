@@ -2,7 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, Moon, Sun, Info, Plus, Play, Pause, Edit2, Save, X, RefreshCw, Globe, Trash2 } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 
+// Import new Brazilian PII rules
+import { cpfRule } from '../config/pii_rules/cpf';
+import { rgRule } from '../config/pii_rules/rg';
+import { cnhRule } from '../config/pii_rules/cnh';
+import { cepRule } from '../config/pii_rules/cep';
+
+// Import adapted existing rules (pt-BR versions)
+import { fullName_ptBR_Rule } from '../config/pii_rules/fullName_ptBR';
+import { email_ptBR_Rule } from '../config/pii_rules/email_ptBR';
+import { ssn_USA_ptBR_Rule } from '../config/pii_rules/ssn_USA_ptBR';
+import { creditCard_ptBR_Rule } from '../config/pii_rules/creditCard_ptBR';
+import { apiToken_ptBR_Rule } from '../config/pii_rules/apiToken_ptBR';
+import { awsKey_ptBR_Rule } from '../config/pii_rules/awsKey_ptBR';
+import { phone_ptBR_Rule } from '../config/pii_rules/phone_ptBR';
+import { websiteURL_ptBR_Rule } from '../config/pii_rules/websiteURL_ptBR';
+import { macAddress_ptBR_Rule } from '../config/pii_rules/macAddress_ptBR';
+import { ipv4Address_ptBR_Rule } from '../config/pii_rules/ipv4Address_ptBR';
+import { ipv6Address_ptBR_Rule } from '../config/pii_rules/ipv6Address_ptBR';
+import { date_ptBR_Rule } from '../config/pii_rules/date_ptBR';
+import { vin_ptBR_Rule } from '../config/pii_rules/vin_ptBR';
+
 // Types
+// Note: Sanitization type is also imported by the rule files.
+// If this local definition differs, it might cause issues.
+// For now, assuming they are compatible as per current structure.
 interface Sanitization {
   id: string;
   description: string;
@@ -25,111 +49,28 @@ const DEFAULT_WEBSITES = [
   { url: 'bard.google.com', enabled: true }
 ];
 
-const DEFAULT_SANITIZATIONS = [
-  {
-    id: '1',
-    description: 'Full Names (e.g., John Doe).',
-    pattern: '\\b[A-Z][a-z]+\\s[A-Z][a-z]+\\b',
-    replacement: 'John Doe',
-    enabled: false,
-    isRegex: true
-  },
-  {
-    id: '2',
-    description: 'Email Addresses.',
-    pattern: '\\b[A-Za-z0-9_%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b',
-    replacement: 'email@domain.com',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '3',
-    description: 'Social Security Numbers (SSN)',
-    pattern: '\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b',
-    replacement: 'XXX-XX-XXXX',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '4',
-    description: 'Credit Card Numbers (All Major Cards)',
-    pattern: '\\b(?:3(?:0[0-5]|09|[68][0-9])[0-9]{11,14}|4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\d{3})\\d{11}|62[0-9]{14,17})\\b',
-    replacement: '************1234',
-    enabled: true,
-    isRegex: true
-  },
-  { //Needs to Trigger Before Phone Numbers
-    id: '5',
-    description: 'Common API/Auth Tokens',
-    pattern: '\\b(?:bearer|api_key|auth_token)\\b\\s+([A-Za-z0-9._+\\-\\/]{20,})\\b',
-    replacement: 'API_TOKEN_REMOVED',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '6',
-    description: 'AWS Access Keys',
-    pattern: '\\b(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}\\b',
-    replacement: 'AWS_KEY_REMOVED',
-    enabled: true,
-    isRegex: true
-},
-  {
-    id: '7',
-    description: 'Phone Numbers (All Common Formats)',
-    pattern: '(?:\\+?1[-.\\s]?)?(?:\\([2-9][0-9]{2}\\)|[2-9][0-9]{2})[-.,\\s]?[2-9][0-9]{2}[-.,\\s]?[0-9]{4}|(?:\\+?1[-.,\\s]?)?\\b[2-9][0-9]{2}[-.,\\s]?[2-9][0-9]{2}[-.,\\s]?[0-9]{4}\\b',
-    replacement: '(XXX) XXX-XXXX',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '8',
-    description: 'Website URLs',
-    pattern: '\\b(?:(?:https?:|ftp:|sftp:)//)?(?:www\\.)?(?!(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b)[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9](?:\\.[a-zA-Z]{2,})+(?::[0-9]{1,5})?(?:/[^\\s]*)?\\b',
-    replacement: 'https://domain.com',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '9',
-    description: 'MAC Addresses',
-    pattern: '\\b(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})\\b',
-    replacement: 'XX:XX:XX:XX:XX:XX',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '10',
-    description: 'IPv4 Addresses',
-    pattern: '\\b(?<!:)(?<!://)(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?![a-zA-Z])\\b',
-    replacement: 'XXX.XXX.XXX.XXX',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '11',
-    description: 'IPv6 Addresses',
-    pattern: '(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:)*:(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}|::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:)*::)(?!/)',
-    replacement: 'XXXX:XXXX:XXXX:XXXX:XXXX:XXXX:XXXX:XXXX',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '12',
-    description: 'Dates (Various Formats)',
-    pattern: '\\b(?:(?:(?:0?[1-9]|1[0-2])[/.-](?:0?[1-9]|[12]\\d|3[01])[/.-](?:19|20)?\\d{2})|(?:(?:0?[1-9]|[12]\\d|3[01])[/.-](?:0?[1-9]|1[0-2])[/.-](?:19|20)?\\d{2})|(?:(?:19|20)?\\d{2}[/.-](?:0?[1-9]|1[0-2])[/.-](?:0?[1-9]|[12]\\d|3[01])))\\b',
-    replacement: '1999/12/31',
-    enabled: true,
-    isRegex: true
-  },
-  {
-    id: '13',
-    description: 'VIN Numbers',
-    pattern: '\\b(?:VIN|Vehicle|ID)\\s*[:#]?\\s*[A-HJ-NPR-Z0-9]{17}\\b',
-    replacement: 'VIN_REMOVED',
-    enabled: true,
-    isRegex: true
-  }
+const DEFAULT_SANITIZATIONS: Sanitization[] = [
+  // New Brazilian PII Rules
+  cpfRule,
+  rgRule,
+  cnhRule,
+  cepRule,
+
+  // Adapted Existing Rules (pt-BR)
+  // Ordered by their original IDs for some consistency
+  fullName_ptBR_Rule,    // Original ID 1
+  email_ptBR_Rule,       // Original ID 2
+  ssn_USA_ptBR_Rule,     // Original ID 3 (US SSN, disabled by default)
+  creditCard_ptBR_Rule,  // Original ID 4
+  apiToken_ptBR_Rule,    // Original ID 5
+  awsKey_ptBR_Rule,      // Original ID 6
+  phone_ptBR_Rule,       // Original ID 7
+  websiteURL_ptBR_Rule,  // Original ID 8
+  macAddress_ptBR_Rule,  // Original ID 9
+  ipv4Address_ptBR_Rule, // Original ID 10
+  ipv6Address_ptBR_Rule, // Original ID 11
+  date_ptBR_Rule,        // Original ID 12
+  vin_ptBR_Rule,         // Original ID 13
 ];
 
 const PIISanitizer = () => {
@@ -227,19 +168,19 @@ const PIISanitizer = () => {
 
   const addWebsite = () => {
     if (!newWebsite) {
-      setShowDuplicateWebsiteError('Please enter a website URL');
+      setShowDuplicateWebsiteError('Por favor, insira a URL de um site.');
       return;
     }
 
     if (!validateUrl(newWebsite)) {
-      setShowDuplicateWebsiteError('Please enter a valid website URL');
+      setShowDuplicateWebsiteError('Por favor, insira uma URL de site válida.');
       return;
     }
 
     const hostname = new URL(newWebsite.startsWith('http') ? newWebsite : `https://${newWebsite}`).hostname;
     
     if (websites.some(site => site.url === hostname)) {
-      setShowDuplicateWebsiteError('This website is already in the list');
+      setShowDuplicateWebsiteError('Este site já está na lista.');
       return;
     }
 
@@ -251,7 +192,7 @@ const PIISanitizer = () => {
 
   const addSanitization = () => {
     if (!newSanitization.description || !newSanitization.pattern || !newSanitization.replacement) {
-      setShowSanitizationError('Please fill in all fields');
+      setShowSanitizationError('Por favor, preencha todos os campos.');
       return;
     }
 
@@ -263,12 +204,12 @@ const PIISanitizer = () => {
     );
 
     if (duplicateDesc) {
-      setShowSanitizationError('A sanitization with this description already exists');
+      setShowSanitizationError('Uma regra com esta descrição já existe.');
       return;
     }
 
     if (duplicatePattern) {
-      setShowSanitizationError('This pattern already exists');
+      setShowSanitizationError('Este padrão já existe.');
       return;
     }
 
@@ -276,7 +217,7 @@ const PIISanitizer = () => {
       try {
         new RegExp(newSanitization.pattern);
       } catch (e) {
-        setShowSanitizationError('Invalid regex pattern');
+        setShowSanitizationError('Padrão de regex inválido.');
         return;
       }
     }
@@ -326,7 +267,7 @@ const PIISanitizer = () => {
       try {
         new RegExp(editedSanitization.pattern);
       } catch (e) {
-        setShowSanitizationError('Invalid regex pattern');
+        setShowSanitizationError('Padrão de regex inválido.');
         return;
       }
     }
@@ -369,7 +310,7 @@ const PIISanitizer = () => {
   const resetWebsitesToDefaults = () => {
     setWebsites([...DEFAULT_WEBSITES]);
     saveToStorage('websites', DEFAULT_WEBSITES);
-    setShowDuplicateWebsiteError('Websites reset to defaults');
+    setShowDuplicateWebsiteError('Sites redefinidos para o padrão.');
   };
 
   return (
@@ -383,7 +324,7 @@ const PIISanitizer = () => {
           >
             {isGloballyPaused ? <Play size={20} /> : <Pause size={20} />}
           </button>
-          <h1 className="text-xl font-bold">PII Sanitizer</h1>
+          <h1 className="text-xl font-bold">Sanitizador de PII</h1>
         </div>
         
         <div className="flex items-center space-x-4">
@@ -415,21 +356,21 @@ const PIISanitizer = () => {
       {showResetAlert && (
         <Alert className="mb-4">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Warning</AlertTitle>
+          <AlertTitle>Aviso</AlertTitle>
           <AlertDescription>
-            This will reset all sanitizations to default settings. Any custom rules will be lost.
+            Isso redefinirá todas as regras de sanitização para as configurações padrão. Quaisquer regras personalizadas serão perdidas.
             <div className="mt-4 space-x-4">
               <button 
                 className="px-4 py-2 bg-red-600 text-white rounded"
                 onClick={resetToDefaults}
               >
-                Reset
+                Redefinir
               </button>
               <button 
                 className="px-4 py-2 bg-gray-600 text-white rounded"
                 onClick={() => setShowResetAlert(false)}
               >
-                Cancel
+                Cancelar
               </button>
             </div>
           </AlertDescription>
@@ -441,14 +382,14 @@ const PIISanitizer = () => {
         <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
           <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowInfoModal(false)} />
           <div className={`relative w-full max-w-md rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-gray-100'} shadow-xl`}>
-            <h2 className="text-xl font-bold mb-4">About PII Sanitizer</h2>
+            <h2 className="text-xl font-bold mb-4">Sobre o Sanitizador de PII</h2>
             <div className="space-y-3 text-sm">
-              <p>PII Sanitizer helps protect sensitive information by automatically detecting and replacing personally identifiable information (PII) in your text inputs.</p>
-              <p>To use:</p>
+              <p>O Sanitizador de PII ajuda a proteger informações sensíveis ao detectar e substituir automaticamente informações de identificação pessoal (PII) em suas entradas de texto.</p>
+              <p>Para usar:</p>
               <ol className="list-decimal list-inside space-y-1">
-                <li>Add websites where you want PII protection</li>
-                <li>Create custom sanitization rules or use defaults</li>
-                <li>Toggle individual rules or pause all sanitization</li>
+                <li>Adicione sites onde você deseja proteção de PII</li>
+                <li>Crie regras de sanitização personalizadas ou use as padrões</li>
+                <li>Alterne regras individuais ou pause toda a sanitização</li>
               </ol>
               <div className="mt-4">
                 <a 
@@ -457,7 +398,7 @@ const PIISanitizer = () => {
                   rel="noopener noreferrer" 
                   className="text-blue-500 hover:underline"
                 >
-                  Donate via Paypal
+                  Doar via Paypal
                 </a>
                 <span className="mx-2">•</span>
                 <a 
@@ -466,7 +407,7 @@ const PIISanitizer = () => {
                   rel="noopener noreferrer" 
                   className="text-blue-500 hover:underline"
                 >
-                  View Source Code
+                  Ver Código Fonte
                 </a>
               </div>
               <div className="mt-4">
@@ -477,7 +418,7 @@ const PIISanitizer = () => {
               onClick={() => setShowInfoModal(false)}
               className="mt-4 w-full p-2 bg-gray-600 text-white rounded"
             >
-              Close
+              Fechar
             </button>
           </div>
         </div>
@@ -488,11 +429,11 @@ const PIISanitizer = () => {
         <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
           <div className="absolute inset-0 bg-black bg-opacity-50" onClick={() => setShowWebsitesModal(false)} />
           <div className={`relative w-full max-w-md rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-gray-100'} shadow-xl`}>
-            <h2 className="text-xl font-bold mb-4">Manage Websites</h2>
+            <h2 className="text-xl font-bold mb-4">Gerenciar Sites</h2>
             <div className="flex space-x-2 mb-4">
               <input
                 type="text"
-                placeholder="Enter website URL"
+                placeholder="Digite a URL do site"
                 value={newWebsite}
                 onChange={(e) => setNewWebsite(e.target.value)}
                 className={`flex-1 p-2 rounded text-sm ${darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-900'}`}
@@ -535,13 +476,13 @@ const PIISanitizer = () => {
               onClick={() => setShowWebsitesModal(false)}
               className="mt-4 w-full p-2 bg-gray-600 text-white rounded"
             >
-              Close
+              Fechar
             </button>
             <button 
               onClick={resetWebsitesToDefaults}
               className="mt-2 w-full p-2 bg-blue-600 text-white rounded"
             >
-              Restore Default Websites
+              Restaurar Sites Padrão
             </button>
           </div>
         </div>
@@ -557,21 +498,21 @@ const PIISanitizer = () => {
         <div className="grid grid-cols-1 gap-2">
           <input
             type="text"
-            placeholder="Description"
+            placeholder="Descrição"
             value={newSanitization.description}
             onChange={e => setNewSanitization({...newSanitization, description: e.target.value})}
             className={`w-full p-2 rounded ${darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-700'}`}
           />
           <input
             type="text"
-            placeholder="Pattern (text to find)"
+            placeholder="Padrão (texto a ser encontrado)"
             value={newSanitization.pattern}
             onChange={e => setNewSanitization({...newSanitization, pattern: e.target.value})}
             className={`w-full p-2 rounded ${darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-700'}`}
           />
           <input
             type="text"
-            placeholder="Replacement Value"
+            placeholder="Valor de Substituição"
             value={newSanitization.replacement}
             onChange={e => setNewSanitization({...newSanitization, replacement: e.target.value})}
             className={`w-full p-2 rounded ${darkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-700'}`}
@@ -585,14 +526,14 @@ const PIISanitizer = () => {
               className="mr-2 h-4 w-4"
             />
             <label htmlFor="isRegex" className="text-sm">
-              Use Regular Expression
+              Usar Expressão Regular
             </label>
           </div>
           <button
             onClick={addSanitization}
             className="w-full p-2 bg-green-600 text-white rounded flex items-center justify-center"
           >
-            <Plus size={20} className="mr-2" /> Add Sanitization
+            <Plus size={20} className="mr-2" /> Adicionar Regra
           </button>
         </div>
       </div>
@@ -648,9 +589,9 @@ const PIISanitizer = () => {
             ) : (
               <div>
                 <h3 className="font-bold mb-1">{sanitization.description}</h3>
-                <p className="text-sm opacity-90 mb-1">Pattern: {sanitization.pattern}</p>
-                <p className="text-sm opacity-90">Replacement: {sanitization.replacement}</p>
-                <p className="text-sm opacity-90 mt-1">Type: {sanitization.isRegex ? 'Regular Expression' : 'Simple Text'}</p>
+                <p className="text-sm opacity-90 mb-1">Padrão: {sanitization.pattern}</p>
+                <p className="text-sm opacity-90">Substituição: {sanitization.replacement}</p>
+                <p className="text-sm opacity-90 mt-1">Tipo: {sanitization.isRegex ? 'Expressão Regular' : 'Texto Simples'}</p>
               </div>
             )}
             
@@ -660,21 +601,21 @@ const PIISanitizer = () => {
                   <button
                     onClick={() => saveSanitization(sanitization.id)}
                     className="p-2 bg-green-600 rounded hover:bg-green-700"
-                    title="Save changes"
+                    title="Salvar"
                   >
                     <Save size={16} />
                   </button>
                   <button
                     onClick={() => discardChanges(sanitization.id)}
                     className="p-2 bg-yellow-600 rounded hover:bg-yellow-700"
-                    title="Discard changes"
+                    title="Descartar alterações"
                   >
                     <X size={16} />
                   </button>
                   <button
                     onClick={() => deleteSanitization(sanitization.id)}
                     className="p-2 bg-red-600 rounded hover:bg-red-700"
-                    title="Delete sanitization"
+                    title="Excluir regra"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -684,14 +625,14 @@ const PIISanitizer = () => {
                   <button
                     onClick={() => toggleSanitization(sanitization.id)}
                     className={`p-2 rounded hover:opacity-80 ${sanitization.enabled ? 'bg-yellow-600' : 'bg-green-600'}`}
-                    title={sanitization.enabled ? "Pause sanitization" : "Resume sanitization"}
+                    title={sanitization.enabled ? "Pausar regra" : "Retomar regra"}
                   >
                     {sanitization.enabled ? <Pause size={16} /> : <Play size={16} />}
                   </button>
                   <button
                     onClick={() => editSanitization(sanitization)}
                     className="p-2 bg-blue-600 rounded hover:bg-blue-700"
-                    title="Edit sanitization"
+                    title="Editar regra"
                   >
                     <Edit2 size={16} />
                   </button>
