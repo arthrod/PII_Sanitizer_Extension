@@ -1,3 +1,4 @@
+import { sanitizeText, SanitizeResult } from './sanitizer';
 import { Sanitization, Website } from '../types/types';
 
 let sanitizations: Sanitization[] = [];
@@ -5,6 +6,36 @@ let websites: Website[] = [];
 let isGloballyPaused = false;
 let isInitialized = false;
 let isProgrammaticUpdate = false;
+let lastActiveElement: HTMLElement | null = null;
+
+const scrubButtons = new WeakMap<HTMLElement, HTMLButtonElement>();
+const highlightTimers = new WeakMap<HTMLElement, number>();
+
+function formatScrubButtonLabel(matchCount: number): string {
+  if (matchCount <= 0) {
+    return 'Scrub sensitive data';
+  }
+
+  return `Scrub ${matchCount} sensitive item${matchCount === 1 ? '' : 's'}`;
+}
+
+function updateScrubButtonLabel(target: HTMLElement, matchCount: number): void {
+  const button = scrubButtons.get(target);
+  if (!button) {
+    return;
+  }
+
+  const label = formatScrubButtonLabel(matchCount);
+  if (button.textContent !== label) {
+    button.textContent = label;
+  }
+
+  if (matchCount > 0) {
+    button.dataset.matchCount = String(matchCount);
+  } else {
+    delete button.dataset.matchCount;
+  }
+}
 
 // Load settings from storage
 function loadSettings() {
@@ -42,6 +73,12 @@ chrome.storage.onChanged.addListener((changes) => {
   }
   if (changes.isGloballyPaused) {
     isGloballyPaused = changes.isGloballyPaused.newValue;
+  }
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'perform-manual-scrub' && lastActiveElement) {
+    sanitizeElement(lastActiveElement, { manual: true });
   }
 });
 
@@ -100,111 +137,106 @@ function getTextFromContentEditable(element: HTMLElement, isProseMirror: boolean
   }
 }
 
-function sanitizeText(
-  text: string | null | undefined,
-  cursorPosition: number | null = null,
-  isPaste: boolean = false
-): { text: string; cursorPosition: number | null } {
-  console.log('Sanitizing text:', { text, cursorPosition, isPaste });
+function showToast(message: string) {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  toast.className = 'pii-toast-notification';
+  toast.setAttribute('role', 'status');
+  document.body.appendChild(toast);
 
-  if (!text || isGloballyPaused) {
-    console.log('Text empty or globally paused, returning original');
-    return { 
-      text: text || '', 
-      cursorPosition: cursorPosition 
-    };
-  }
+  requestAnimationFrame(() => {
+    toast.classList.add('pii-toast-visible');
+  });
 
-  // Normalize line endings while preserving them
-  let sanitizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  let newCursorPosition = cursorPosition;
-  let lastReplacementEnd = -1;
-  let currentPosition = 0;
-
-  // Split text into lines while preserving newlines
-  const lines = sanitizedText.split(/(\n)/);
-  const sanitizedLines: string[] = [];
-
-  for (const line of lines) {
-    // Preserve exact newlines
-    if (line === '\n') {
-      sanitizedLines.push(line);
-      currentPosition += line.length;
-      continue;
-    }
-
-    let processedLine = line;
-    for (const rule of sanitizations) {
-      if (!rule.enabled) continue;
-
-      try {
-        const originalLine = processedLine;
-        
-        if (rule.isRegex) {
-          const regex = new RegExp(rule.pattern, 'g');
-          processedLine = processedLine.replace(regex, rule.replacement);
-        } else {
-          const escapedPattern = rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(escapedPattern, 'g');
-          
-          let match;
-          while ((match = regex.exec(originalLine)) !== null) {
-            if (cursorPosition !== null && !isPaste) {
-              const globalMatchIndex = currentPosition + match.index;
-              if (globalMatchIndex <= cursorPosition) {
-                lastReplacementEnd = globalMatchIndex + rule.replacement.length;
-              }
-            }
-          }
-          
-          processedLine = processedLine.replace(regex, rule.replacement);
-        }
-      } catch (e) {
-        console.error('Error applying sanitization rule:', { rule, error: e });
-      }
-    }
-    
-    sanitizedLines.push(processedLine);
-    currentPosition += line.length;
-  }
-
-  // Join lines back together while preserving newlines
-  sanitizedText = sanitizedLines.join('');
-
-  // Update cursor position
-  if (cursorPosition !== null) {
-    if (isPaste) {
-      newCursorPosition = sanitizedText.length;
-    } else {
-      if (lastReplacementEnd >= 0) {
-        newCursorPosition = lastReplacementEnd;
-      } else if (cursorPosition === text.length) {
-        newCursorPosition = sanitizedText.length;
-      } else {
-        newCursorPosition = Math.min(cursorPosition, sanitizedText.length);
-      }
-    }
-  }
-
-  return { text: sanitizedText, cursorPosition: newCursorPosition };
+  window.setTimeout(() => {
+    toast.classList.remove('pii-toast-visible');
+    window.setTimeout(() => toast.remove(), 300);
+  }, 2400);
 }
 
-function handleInput(event: Event) {
-  if (isGloballyPaused || isProgrammaticUpdate) {
+function updateSensitiveIndicator(target: HTMLElement, matchCount: number) {
+  updateScrubButtonLabel(target, matchCount);
+
+  if (matchCount > 0) {
+    target.dataset.piiMatchCount = String(matchCount);
+    target.classList.add('pii-just-sanitized');
+
+    const existingTimer = highlightTimers.get(target);
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      target.classList.remove('pii-just-sanitized');
+      highlightTimers.delete(target);
+    }, 2000);
+
+    highlightTimers.set(target, timeoutId);
+  } else {
+    target.classList.remove('pii-just-sanitized');
+    const timer = highlightTimers.get(target);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+    }
+    highlightTimers.delete(target);
+    delete target.dataset.piiMatchCount;
+  }
+}
+
+function ensureScrubButton(target: HTMLElement) {
+  if (scrubButtons.has(target)) {
     return;
   }
 
-  const target = event.target as HTMLElement;
-  
-  if (isHiddenTextarea(target)) {
+  if (!target.parentElement) {
     return;
   }
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = formatScrubButtonLabel(0);
+  button.className = 'pii-scrub-button';
+  button.setAttribute('aria-live', 'polite');
+  button.addEventListener('click', () => {
+    sanitizeElement(target, { manual: true });
+  });
+
+  target.insertAdjacentElement('afterend', button);
+  scrubButtons.set(target, button);
+}
+
+function removeScrubButton(target: HTMLElement) {
+  const button = scrubButtons.get(target);
+  if (!button) {
+    return;
+  }
+
+  button.remove();
+  scrubButtons.delete(target);
+}
+
+function sanitizeElement(
+  target: HTMLElement,
+  options: { isPaste?: boolean; manual?: boolean } = {}
+): SanitizeResult {
+  const { isPaste = false, manual = false } = options;
 
   let text: string | null = null;
   let cursorPosition: number | null = null;
-
   const isGPT = isChatGPTTextarea(target);
   const isClaude = isClaudeTextarea(target);
+
+  if (!target.isConnected) {
+    removeScrubButton(target);
+    highlightTimers.delete(target);
+    return {
+      text: '',
+      cursorPosition: null,
+      matches: [],
+      replacementCount: 0,
+      changed: false
+    };
+  }
 
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
     text = target.value;
@@ -218,129 +250,149 @@ function handleInput(event: Event) {
     }
   }
 
-  if (text !== null) {
-    const isPaste = target.dataset.justPasted === 'true';
-    const { text: sanitizedText, cursorPosition: newCursorPosition } = 
-      sanitizeText(text, cursorPosition, isPaste);
-    
-    if (sanitizedText !== text) {
-      isProgrammaticUpdate = true;
-      try {
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-          target.value = sanitizedText;
-          if (newCursorPosition !== null) {
-            target.setSelectionRange(newCursorPosition, newCursorPosition);
-          }
-        } else if (target instanceof HTMLElement && target.isContentEditable) {
-          if (isGPT) {
-            target.innerHTML = formatForChatGPT(sanitizedText);
-          } else if (isClaude) {
-            target.innerHTML = formatForClaude(sanitizedText);
-          } else {
-            target.textContent = sanitizedText;
-          }
+  if (text === null) {
+    return {
+      text: '',
+      cursorPosition: null,
+      matches: [],
+      replacementCount: 0,
+      changed: false
+    };
+  }
 
-          if (newCursorPosition !== null && window.getSelection) {
-            const selection = window.getSelection();
-            if (selection) {
-              try {
-                const range = document.createRange();
-                if (isGPT || isClaude) {
-                  // For ProseMirror editors, position at end of content
-                  const lastChild = target.lastElementChild || target;
-                  range.selectNodeContents(lastChild);
-                  range.collapse(false);
-                } else if (target.firstChild) {
-                  // For standard contenteditable
-                  const safePosition = Math.min(newCursorPosition, sanitizedText.length);
-                  range.setStart(target.firstChild, safePosition);
-                  range.setEnd(target.firstChild, safePosition);
-                }
-                selection.removeAllRanges();
-                selection.addRange(range);
-              } catch (e) {
-                console.error('Error setting cursor position:', e);
-                const range = document.createRange();
-                range.selectNodeContents(target);
+  lastActiveElement = target;
+
+  if (isGloballyPaused) {
+    if (text.trim()) {
+      ensureScrubButton(target);
+      updateScrubButtonLabel(target, 0);
+    } else {
+      removeScrubButton(target);
+    }
+
+    return {
+      text,
+      cursorPosition,
+      matches: [],
+      replacementCount: 0,
+      changed: false
+    };
+  }
+
+  if (text.trim()) {
+    ensureScrubButton(target);
+  } else {
+    removeScrubButton(target);
+  }
+
+  const result = sanitizeText(text, sanitizations, {
+    cursorPosition,
+    isPaste
+  });
+
+  updateSensitiveIndicator(target, result.replacementCount);
+
+  if (result.text !== text) {
+    isProgrammaticUpdate = true;
+    try {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        target.value = result.text;
+        if (result.cursorPosition !== null) {
+          target.setSelectionRange(result.cursorPosition, result.cursorPosition);
+        }
+      } else if (target instanceof HTMLElement && target.isContentEditable) {
+        if (isGPT) {
+          target.innerHTML = formatForChatGPT(result.text);
+        } else if (isClaude) {
+          target.innerHTML = formatForClaude(result.text);
+        } else {
+          target.textContent = result.text;
+        }
+
+        if (result.cursorPosition !== null && window.getSelection) {
+          const selection = window.getSelection();
+          if (selection) {
+            try {
+              const range = document.createRange();
+              if (isGPT || isClaude) {
+                const lastChild = target.lastElementChild || target;
+                range.selectNodeContents(lastChild);
                 range.collapse(false);
-                selection.removeAllRanges();
-                selection.addRange(range);
+              } else if (target.firstChild) {
+                const safePosition = Math.min(result.cursorPosition, result.text.length);
+                range.setStart(target.firstChild, safePosition);
+                range.setEnd(target.firstChild, safePosition);
               }
+              selection.removeAllRanges();
+              selection.addRange(range);
+            } catch (e) {
+              console.error('Error setting cursor position:', e);
+              const range = document.createRange();
+              range.selectNodeContents(target);
+              range.collapse(false);
+              selection.removeAllRanges();
+              selection.addRange(range);
             }
           }
         }
-      } finally {
-        isProgrammaticUpdate = false;
-        delete target.dataset.justPasted;
       }
+    } finally {
+      isProgrammaticUpdate = false;
+      delete target.dataset.justPasted;
+    }
+  } else if (!isPaste) {
+    delete target.dataset.justPasted;
+  }
+
+  if (manual) {
+    if (result.replacementCount > 0) {
+      showToast(`${result.replacementCount} sensitive item${result.replacementCount > 1 ? 's' : ''} masked`);
+    } else {
+      showToast('No sensitive items detected');
     }
   }
+
+  return result;
 }
 
-function handlePaste(event: ClipboardEvent) {
-  console.log('=== PASTE EVENT START ===');
-  console.log('Initial target:', {
-    element: event.target,
-    id: (event.target as HTMLElement).id,
-    classList: (event.target as HTMLElement).classList,
-    parentElement: (event.target as HTMLElement).parentElement?.id
-  });
-
+function handleInput(event: Event) {
   if (isGloballyPaused || isProgrammaticUpdate) {
-    console.log('Skipping due to pause/programmatic update');
     return;
   }
 
   const target = event.target as HTMLElement;
-  
+
   if (isHiddenTextarea(target)) {
-    console.log('Skipping hidden textarea');
+    return;
+  }
+
+  sanitizeElement(target, { isPaste: target.dataset.justPasted === 'true' });
+}
+
+function handlePaste(event: ClipboardEvent) {
+  if (isGloballyPaused || isProgrammaticUpdate) {
+    return;
+  }
+
+  const target = event.target as HTMLElement;
+
+  if (isHiddenTextarea(target)) {
     return;
   }
 
   target.dataset.justPasted = 'true';
+  lastActiveElement = target;
 
   const isGPT = isChatGPTTextarea(target);
   const isClaude = isClaudeTextarea(target);
 
   if (isGPT || isClaude) {
     setTimeout(() => {
-      console.log('=== POST PASTE PROCESSING FOR EDITOR ===');
-      const content = getTextFromContentEditable(target, true);
-      console.log('Current content:', content);
-      
-      const { text: sanitizedText } = sanitizeText(content, null, true);
-      console.log('Sanitized content:', sanitizedText);
-
-      if (content !== sanitizedText) {
-        isProgrammaticUpdate = true;
-        try {
-          target.innerHTML = isGPT ? 
-            formatForChatGPT(sanitizedText) : 
-            formatForClaude(sanitizedText);
-
-          // Position cursor at end
-          const selection = window.getSelection();
-          if (selection) {
-            const range = document.createRange();
-            const lastChild = target.lastElementChild || target;
-            range.selectNodeContents(lastChild);
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          }
-        } finally {
-          isProgrammaticUpdate = false;
-          delete target.dataset.justPasted;
-        }
-      }
+      sanitizeElement(target, { isPaste: true });
     }, 0);
   } else {
-    // For standard inputs, let input handler process
-    console.log('Standard paste handling - letting input handler process');
+    sanitizeElement(target, { isPaste: true });
   }
-
-  console.log('=== PASTE PROCESSING COMPLETE ===');
 }
 
 function shouldMonitorElement(element: HTMLElement): boolean {
@@ -407,6 +459,55 @@ function initializeMonitoring() {
       border-color: #16a34a !important;
       border-radius: 5px;
     }
+    .pii-just-sanitized {
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.45) !important;
+    }
+    .pii-scrub-button {
+      margin-top: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      border: 1px solid #e5e7eb;
+      background: #111827;
+      color: #f9fafb;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+    }
+    .pii-scrub-button:hover {
+      background: #1f2937;
+    }
+    .pii-scrub-button[data-match-count] {
+      background: #dc2626;
+      border-color: #b91c1c;
+    }
+    .pii-scrub-button[data-match-count]:hover {
+      background: #b91c1c;
+    }
+    .pii-toast-notification {
+      position: fixed;
+      bottom: 120px;
+      right: 24px;
+      padding: 8px 12px;
+      background: rgba(17, 24, 39, 0.95);
+      color: #f9fafb;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.4;
+      z-index: 2147483647;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .pii-toast-visible {
+      opacity: 0.95;
+      transform: translateY(0);
+    }
   `;
   document.head.appendChild(style);
 
@@ -449,3 +550,10 @@ function initializeMonitoring() {
 
   setInterval(debouncedSetup, 2000);
 }
+
+document.addEventListener('focus', (event) => {
+  const target = event.target;
+  if (target instanceof HTMLElement) {
+    lastActiveElement = target;
+  }
+}, true);
