@@ -1,4 +1,5 @@
 import { Sanitization } from '../types/types';
+import { Pseudonymizer } from './pseudonymizer';
 
 export interface SanitizationMatch {
   id: string;
@@ -11,6 +12,7 @@ export interface SanitizationMatch {
 export interface SanitizeOptions {
   cursorPosition?: number | null;
   isPaste?: boolean;
+  pseudonymizer?: Pseudonymizer;
 }
 
 export interface SanitizeResult {
@@ -45,6 +47,7 @@ export function sanitizeText(
 ): SanitizeResult {
   const cursorPosition = options.cursorPosition ?? null;
   const isPaste = options.isPaste ?? false;
+  const pseudonymizer = options.pseudonymizer;
 
   if (!text) {
     return {
@@ -76,6 +79,32 @@ export function sanitizeText(
 
     for (const rule of sanitizations) {
       if (!rule.enabled) {
+        continue;
+      }
+
+      if (rule.pseudonymizeStrategy && pseudonymizer) {
+        const replacementRegex = createRuleRegex(rule);
+        processedLine = processedLine.replace(replacementRegex, (...args) => {
+          const matchedText = args[0];
+          const offset = args[args.length - 2] as number;
+          const globalMatchIndex = currentPosition + offset;
+          const replacement = pseudonymizer.getReplacement(rule, matchedText);
+
+          matches.push({
+            id: rule.id,
+            match: matchedText,
+            replacement,
+            index: globalMatchIndex,
+            length: matchedText.length
+          });
+
+          if (cursorPosition !== null && !isPaste && globalMatchIndex <= cursorPosition) {
+            lastReplacementEnd = globalMatchIndex + replacement.length;
+          }
+
+          return replacement;
+        });
+
         continue;
       }
 

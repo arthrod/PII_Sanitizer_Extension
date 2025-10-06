@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeNewlines, sanitizeText } from './sanitizer';
+import { Pseudonymizer } from './pseudonymizer';
 import { DEFAULT_SANITIZATIONS } from '../shared/defaults';
 import { Sanitization } from '../types/types';
 
@@ -95,5 +96,38 @@ describe('sanitizeText', () => {
 
     expect(pasted.cursorPosition).toBe(pasted.text.length);
     expect(pasted.replacementCount).toBe(1);
+  });
+
+  it('pseudonymizes repeated names consistently when enabled', () => {
+    const sanitizations = cloneSanitizations();
+    const nameRule = sanitizations.find((rule) => rule.id === '1');
+    expect(nameRule).toBeDefined();
+    if (nameRule) {
+      nameRule.enabled = true;
+    }
+
+    const pseudonymizer = new Pseudonymizer();
+    const sample = 'Alice Smith met Alice Smith for coffee.';
+    const result = sanitizeText(sample, sanitizations, { pseudonymizer });
+
+    expect(result.text).not.toContain('Alice Smith');
+    expect(result.replacementCount).toBe(2);
+    const replacements = result.matches.map((match) => match.replacement);
+    expect(new Set(replacements).size).toBe(1);
+    expect(replacements[0]).toMatch(/^Person \d+$/);
+  });
+
+  it('assigns distinct pseudonyms for different emails', () => {
+    const sanitizations = cloneSanitizations();
+    const pseudonymizer = new Pseudonymizer();
+    const sample = 'Contact alice@example.com or bob@example.org for help.';
+    const result = sanitizeText(sample, sanitizations, { pseudonymizer });
+
+    expect(result.matches.length).toBeGreaterThanOrEqual(2);
+    const replacements = result.matches.map((match) => match.replacement);
+    expect(new Set(replacements).size).toBeGreaterThan(1);
+    replacements.forEach((value) => {
+      expect(value).toMatch(/^user\d+@example\.com$/);
+    });
   });
 });
