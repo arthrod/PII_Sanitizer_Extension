@@ -1,3 +1,17 @@
+export type PseudonymizeStrategy =
+  | 'name'
+  | 'email'
+  | 'ssn'
+  | 'creditCard'
+  | 'phone'
+  | 'url'
+  | 'mac'
+  | 'ipv4'
+  | 'ipv6'
+  | 'date'
+  | 'currency'
+  | 'generic';
+
 export interface Sanitization {
   id: string;
   description: string;
@@ -6,6 +20,7 @@ export interface Sanitization {
   enabled: boolean;
   isEditing?: boolean;
   isRegex: boolean;  // New field to distinguish between regex and simple text replacement
+  pseudonymizeStrategy?: PseudonymizeStrategy;
 }
 
 export interface Website {

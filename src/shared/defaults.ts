@@ -14,7 +14,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b[A-Z][a-z]+\\s[A-Z][a-z]+\\b',
     replacement: 'John Doe',
     enabled: false,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'name'
   },
   {
     id: '2',
@@ -22,7 +23,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b[A-Za-z0-9_%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b',
     replacement: 'email@domain.com',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'email'
   },
   {
     id: '3',
@@ -30,7 +32,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?!000|666|9\\\d{2})\\\d{3}-(?!00)\\\d{2}-(?!0000)\\\d{4}\\b',
     replacement: 'XXX-XX-XXXX',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'ssn'
   },
   {
     id: '4',
@@ -38,7 +41,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?:3(?:0[0-5]|09|[68][0-9])[0-9]{11,14}|4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\\d{3})\\\d{11}|62[0-9]{14,17})\\b',
     replacement: '************1234',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'creditCard'
   },
   {
     id: '5',
@@ -118,7 +122,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '(?:\\\+?1[-.\\\\s]?)?(?:\\\\([2-9][0-9]{2}\\\\)|[2-9][0-9]{2})[-.,\\\\s]?[2-9][0-9]{2}[-.,\\\\s]?[0-9]{4}|(?:\\\+?1[-.,\\\\s]?)?\\\b[2-9][0-9]{2}[-.,\\\\s]?[2-9][0-9]{2}[-.,\\\\s]?[0-9]{4}\\b',
     replacement: '(XXX) XXX-XXXX',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'phone'
   },
   {
     id: '15',
@@ -126,7 +131,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?:(?:https?:|ftp:|sftp:)//)?(?:www\\\\.)?(?!(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b)[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9](?:\\\\.[a-zA-Z]{2,})+(?::[0-9]{1,5})?(?:/[^\\\\s]*)?\\b',
     replacement: 'https://domain.com',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'url'
   },
   {
     id: '16',
@@ -134,7 +140,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})\\b',
     replacement: 'XX:XX:XX:XX:XX:XX',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'mac'
   },
   {
     id: '17',
@@ -142,7 +149,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?<!:)(?<!://)(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?![a-zA-Z])\\b',
     replacement: 'XXX.XXX.XXX.XXX',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'ipv4'
   },
   {
     id: '18',
@@ -150,7 +158,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:)*:(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}|::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:)*::)(?!/)',
     replacement: 'XXXX:XXXX:XXXX:XXXX:XXXX:XXXX:XXXX:XXXX',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'ipv6'
   },
   {
     id: '19',
@@ -158,7 +167,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b(?:(?:(?:0?[1-9]|1[0-2])[/.-](?:0?[1-9]|[12]\\\d|3[01])[/.-](?:19|20)?\\\d{2})|(?:(?:0?[1-9]|[12]\\\d|3[01])[/.-](?:0?[1-9]|1[0-2])[/.-](?:19|20)?\\\d{2})|(?:(?:19|20)?\\\d{2}[/.-](?:0?[1-9]|1[0-2])[/.-](?:0?[1-9]|[12]\\\d|3[01])))\\b',
     replacement: '1999/12/31',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'date'
   },
   {
     id: '20',
@@ -174,7 +184,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\b[0-9]{3}[- ]?[0-9]{3}[- ]?[0-9]{3}\\b',
     replacement: '***-***-***',
     enabled: true,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'ssn'
   },
   {
     id: '22',
@@ -182,7 +193,8 @@ export const DEFAULT_SANITIZATIONS: Sanitization[] = [
     pattern: '\\$\\d{1,3}(?:,\\\d{3})*(?:\\.\\d{2})?',
     replacement: '$***.**',
     enabled: false,
-    isRegex: true
+    isRegex: true,
+    pseudonymizeStrategy: 'currency'
   },
   {
     id: '23',

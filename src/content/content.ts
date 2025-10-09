@@ -1,5 +1,7 @@
 import { sanitizeText, SanitizeResult } from './sanitizer';
 import { Sanitization, Website } from '../types/types';
+import { sharedPseudonymizer } from './pseudonymizer';
+import { initializeWidget } from './widget';
 
 let sanitizations: Sanitization[] = [];
 let websites: Website[] = [];
@@ -7,6 +9,16 @@ let isGloballyPaused = false;
 let isInitialized = false;
 let isProgrammaticUpdate = false;
 let lastActiveElement: HTMLElement | null = null;
+let isWidgetInitialized = false;
+
+const PROMINENT_HOSTS = new Set([
+  'chat.openai.com',
+  'chatgpt.com',
+  'gemini.google.com',
+  'x.ai',
+  'claude.ai',
+  'bard.google.com'
+]);
 
 const scrubButtons = new WeakMap<HTMLElement, HTMLButtonElement>();
 const highlightTimers = new WeakMap<HTMLElement, number>();
@@ -45,12 +57,8 @@ function loadSettings() {
     websites = result.websites || [];
     isGloballyPaused = result.isGloballyPaused || false;
     console.log('Settings loaded:', { sanitizations, websites, isGloballyPaused });
-    
-    if (shouldMonitorThisPage() && !isInitialized) {
-      console.log('Initializing monitoring...');
-      isInitialized = true;
-      initializeMonitoring();
-    }
+
+    initializeFeaturesIfNeeded();
   });
 }
 
@@ -66,10 +74,7 @@ chrome.storage.onChanged.addListener((changes) => {
   }
   if (changes.websites) {
     websites = changes.websites.newValue;
-    if (shouldMonitorThisPage() && !isInitialized) {
-      isInitialized = true;
-      initializeMonitoring();
-    }
+    initializeFeaturesIfNeeded();
   }
   if (changes.isGloballyPaused) {
     isGloballyPaused = changes.isGloballyPaused.newValue;
@@ -85,6 +90,40 @@ chrome.runtime.onMessage.addListener((message) => {
 function shouldMonitorThisPage(): boolean {
   const currentHostname = window.location.hostname;
   return websites.some(site => site.enabled && currentHostname.includes(site.url));
+}
+
+function isProminentWebsite(): boolean {
+  const currentHostname = window.location.hostname;
+  return Array.from(PROMINENT_HOSTS).some(host => currentHostname.includes(host));
+}
+
+function initializeWidgetIfNeeded() {
+  if (isWidgetInitialized) {
+    return;
+  }
+
+  initializeWidget({
+    getSanitizations: () => sanitizations,
+    pseudonymizer: sharedPseudonymizer,
+    isProminent: isProminentWebsite(),
+    onSubmit: handleWidgetSubmit,
+    showToast
+  });
+
+  isWidgetInitialized = true;
+}
+
+function initializeFeaturesIfNeeded() {
+  if (!shouldMonitorThisPage()) {
+    return;
+  }
+
+  if (!isInitialized) {
+    isInitialized = true;
+    initializeMonitoring();
+  }
+
+  initializeWidgetIfNeeded();
 }
 
 function isHiddenTextarea(element: HTMLElement): boolean {
@@ -287,7 +326,8 @@ function sanitizeElement(
 
   const result = sanitizeText(text, sanitizations, {
     cursorPosition,
-    isPaste
+    isPaste,
+    pseudonymizer: sharedPseudonymizer
   });
 
   updateSensitiveIndicator(target, result.replacementCount);
@@ -353,6 +393,107 @@ function sanitizeElement(
   }
 
   return result;
+}
+
+function isWidgetElement(element: HTMLElement | null): boolean {
+  return Boolean(element && element.closest('.pii-widget'));
+}
+
+function isEligibleInsertionTarget(element: HTMLElement | null): element is HTMLElement {
+  if (!element) {
+    return false;
+  }
+
+  if (isWidgetElement(element)) {
+    return false;
+  }
+
+  return element instanceof HTMLInputElement ||
+         element instanceof HTMLTextAreaElement ||
+         (element instanceof HTMLElement && element.isContentEditable);
+}
+
+function findInsertionTarget(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  if (isEligibleInsertionTarget(active)) {
+    return active;
+  }
+
+  if (isEligibleInsertionTarget(lastActiveElement) && lastActiveElement?.isConnected) {
+    return lastActiveElement;
+  }
+
+  return null;
+}
+
+function insertSanitizedResult(result: SanitizeResult): boolean {
+  const target = findInsertionTarget();
+
+  if (!target) {
+    return false;
+  }
+
+  const sanitizedText = result.text;
+  const isGPT = isChatGPTTextarea(target);
+  const isClaude = isClaudeTextarea(target);
+
+  isProgrammaticUpdate = true;
+  try {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      target.value = sanitizedText;
+      if (typeof target.setSelectionRange === 'function') {
+        const caret = sanitizedText.length;
+        target.setSelectionRange(caret, caret);
+      }
+    } else if (target instanceof HTMLElement && target.isContentEditable) {
+      if (isGPT) {
+        target.innerHTML = formatForChatGPT(sanitizedText);
+      } else if (isClaude) {
+        target.innerHTML = formatForClaude(sanitizedText);
+      } else {
+        target.textContent = sanitizedText;
+      }
+    } else {
+      return false;
+    }
+  } finally {
+    isProgrammaticUpdate = false;
+  }
+
+  try {
+    target.focus({ preventScroll: true });
+  } catch (error) {
+    target.focus();
+  }
+
+  lastActiveElement = target;
+
+  const inputEvent = new Event('input', { bubbles: true });
+  target.dispatchEvent(inputEvent);
+
+  sanitizeElement(target);
+  return true;
+}
+
+function handleWidgetSubmit(result: SanitizeResult): boolean {
+  if (!result.text.trim()) {
+    showToast('Enter text to pseudonymize before inserting');
+    return false;
+  }
+
+  const success = insertSanitizedResult(result);
+
+  if (success) {
+    if (result.replacementCount > 0) {
+      showToast(`Inserted sanitized text (${result.replacementCount} item${result.replacementCount === 1 ? '' : 's'} masked)`);
+    } else {
+      showToast('Inserted text without detected sensitive data');
+    }
+  } else {
+    showToast('Focus a prompt field before inserting sanitized text');
+  }
+
+  return success;
 }
 
 function handleInput(event: Event) {
