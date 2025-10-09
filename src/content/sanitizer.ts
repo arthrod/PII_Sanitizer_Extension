@@ -90,6 +90,10 @@ export function sanitizeText(
           const globalMatchIndex = currentPosition + offset;
           const replacement = pseudonymizer.getReplacement(rule, matchedText);
 
+          if (replacement === matchedText) {
+            return matchedText;
+          }
+
           matches.push({
             id: rule.id,
             match: matchedText,

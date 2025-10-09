@@ -130,4 +130,18 @@ describe('sanitizeText', () => {
       expect(value).toMatch(/^user\d+@example\.com$/);
     });
   });
+
+  it('does not re-pseudonymize text that already contains generated aliases', () => {
+    const sanitizations = cloneSanitizations();
+    const pseudonymizer = new Pseudonymizer();
+    const sample = 'Contact alice@example.com for assistance.';
+
+    const firstPass = sanitizeText(sample, sanitizations, { pseudonymizer });
+    const secondPass = sanitizeText(firstPass.text, sanitizations, { pseudonymizer });
+
+    expect(firstPass.text).not.toBe(sample);
+    expect(secondPass.text).toBe(firstPass.text);
+    expect(secondPass.replacementCount).toBe(0);
+    expect(secondPass.matches).toHaveLength(0);
+  });
 });

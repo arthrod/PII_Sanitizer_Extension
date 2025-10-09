@@ -37,10 +37,12 @@ export class Pseudonymizer {
       return rule.replacement;
     }
 
+    const ruleId = rule.id || 'unknown';
+    const normalizedMatch = normalizeMatch(match);
     const key = serializeKey({
       strategy,
-      normalizedMatch: normalizeMatch(match),
-      ruleId: rule.id || 'unknown'
+      normalizedMatch,
+      ruleId
     });
 
     const existing = this.replacements.get(key);
@@ -50,6 +52,14 @@ export class Pseudonymizer {
 
     const replacement = this.generateReplacement(strategy);
     this.replacements.set(key, replacement);
+
+    const replacementKey = serializeKey({
+      strategy,
+      normalizedMatch: normalizeMatch(replacement),
+      ruleId
+    });
+    this.replacements.set(replacementKey, replacement);
+
     return replacement;
   }
 
