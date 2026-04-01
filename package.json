@@ -24,7 +24,7 @@
     "tailwindcss": "^3.0.0",
     "ts-loader": "^9.0.0",
     "typescript": "^5.0.0",
-    "webpack": "^5.0.0",
+    "webpack": "^5.105.4",
     "webpack-cli": "^5.0.0"
   }
 }
